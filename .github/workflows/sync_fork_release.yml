@@ -1,8 +1,8 @@
 name: Auto Sync Fork with Releases
 
 on:
-  schedule:
-    - cron: '0 2 * * *'  # 每天 UTC 2:00（北京时间 10:00）
+ # schedule:
+ #   - cron: '0 2 * * *'  # 每天 UTC 2:00（北京时间 10:00）
   workflow_dispatch:     # 支持手动触发
 
 env:
