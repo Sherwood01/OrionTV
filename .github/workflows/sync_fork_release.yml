@@ -12,13 +12,13 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
-      workflows: write  # 添加工作流写入权限
+      # 删除错误的 'workflows' 权限，GitHub Actions 没有这个权限作用域
 
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0  # 获取完整历史记录和所有标签[5](@ref)
+          fetch-depth: 0
 
       - name: Setup Git
         run: |
@@ -62,14 +62,14 @@ jobs:
             ((PAGE++))
           done
           
-          # 删除远程tags[7](@ref)
+          # 删除远程tags
           echo "🗑️ 删除远程Tags..."
           for TAG in $LOCAL_TAGS; do
             echo "删除远程Tag: $TAG"
             git push origin --delete "refs/tags/$TAG" 2>/dev/null || true
           done
           
-          # 删除本地tags[7](@ref)
+          # 删除本地tags
           echo "🗑️ 删除本地Tags..."
           git tag -l | xargs git tag -d 2>/dev/null || true
           
@@ -79,7 +79,7 @@ jobs:
       - name: Add Upstream and Fetch Tags
         run: |
           git remote add upstream ${{ env.UPSTREAM_URL }} || true
-          # 强制获取上游所有tags[5](@ref)
+          # 强制获取上游所有tags
           git fetch upstream --tags -f
 
       - name: Install Dependencies
@@ -97,7 +97,7 @@ jobs:
           echo "📤 推送所有Tags到本地仓库..."
           git push origin --tags -f
           
-          # 通过GitHub API获取所有上游Releases[1](@ref)
+          # 通过GitHub API获取所有上游Releases
           UPSTREAM_RELEASES_URL="https://api.github.com/repos/${{ env.UPSTREAM_REPO }}/releases"
           PAGE=1
           ALL_TAGS=""
@@ -200,7 +200,7 @@ jobs:
               if [ -n "$NEW_RELEASE_ID" ]; then
                 echo "✅ Release创建成功，ID: $NEW_RELEASE_ID"
                 
-                # 上传所有Assets[1](@ref)
+                # 上传所有Assets
                 UPLOAD_SUCCESS=0
                 UPLOAD_TOTAL=0
                 
