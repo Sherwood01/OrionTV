@@ -3,6 +3,11 @@ name: Auto Sync Fork with Releases
 on:
   workflow_dispatch:
 
+# 🔐 核心修复：配置工作流权限
+permissions:
+  contents: write   # 允许推送代码和标签
+  workflows: write  # 关键：允许写入工作流文件，解决权限错误
+
 env:
   UPSTREAM_REPO: "orion-lib/OrionTV"
   UPSTREAM_URL: "https://github.com/orion-lib/OrionTV.git"
@@ -10,14 +15,13 @@ env:
 jobs:
   sync-fork:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
+    # 移除了job级别的permissions配置，使用上方的全局配置
 
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0  # 获取完整历史记录和所有标签[1](@ref)
+          fetch-depth: 0
 
       - name: Setup Git
         run: |
@@ -27,7 +31,7 @@ jobs:
       - name: Add Upstream and Sync Tags
         run: |
           git remote add upstream ${{ env.UPSTREAM_URL }} || true
-          # 强制同步所有标签，解决冲突[5](@ref)
+          # 强制同步所有标签，解决冲突
           git fetch upstream --tags -f
           git push origin --tags -f
 
@@ -42,7 +46,7 @@ jobs:
         run: |
           echo "=== 开始同步 ${{ env.UPSTREAM_REPO }} 的 Releases 和 Assets ==="
           
-          # 通过GitHub API获取所有上游Releases，确保完整性[5](@ref)
+          # 通过GitHub API获取所有上游Releases，确保完整性
           UPSTREAM_RELEASES_URL="https://api.github.com/repos/${{ env.UPSTREAM_REPO }}/releases"
           PAGE=1
           ALL_TAGS=""
@@ -169,7 +173,7 @@ jobs:
               if [ -n "$NEW_RELEASE_ID" ]; then
                 echo "✅ Release创建成功，ID: $NEW_RELEASE_ID"
                 
-                # 上传所有Assets[5](@ref)
+                # 上传所有Assets
                 UPLOAD_SUCCESS=0
                 UPLOAD_TOTAL=0
                 
