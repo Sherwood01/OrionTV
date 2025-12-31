@@ -1,13 +1,10 @@
 name: Auto Sync Fork with Releases
 
 on:
- # schedule:
- #   - cron: '0 2 * * *'  # 每天 UTC 2:00（北京时间 10:00）
-  workflow_dispatch:     # 支持手动触发
+  workflow_dispatch:
 
 env:
-  # 🔧 在这里配置你的上游仓库信息
-  UPSTREAM_REPO: "orion-lib/OrionTV"  # 例如: "MoonTechLab/Selene"
+  UPSTREAM_REPO: "orion-lib/OrionTV"
   UPSTREAM_URL: "https://github.com/orion-lib/OrionTV.git"
 
 jobs:
@@ -30,7 +27,26 @@ jobs:
       - name: Add Upstream
         run: |
           git remote add upstream ${{ env.UPSTREAM_URL }} || true
-          git fetch upstream --tags
+
+      - name: Clean Local Tags (解决冲突)
+        run: |
+          # 获取上游所有标签
+          git fetch upstream --tags -f
+          UPSTREAM_TAGS=$(git ls-remote --tags upstream | grep -v '\^{}' | awk -F/ '{print $3}')
+          
+          # 删除本地与上游冲突的标签
+          for TAG in $UPSTREAM_TAGS; do
+            if git show-ref --tags | grep -q "refs/tags/$TAG"; then
+              echo "删除本地标签: $TAG"
+              git tag -d "$TAG" || true
+            fi
+          done
+
+      - name: Fetch Upstream Tags Safely
+        run: |
+          # 安全获取上游标签，强制覆盖本地冲突
+          git fetch upstream --tags -f
+          echo "✅ 标签获取完成"
 
       - name: Install Dependencies
         run: |
@@ -44,29 +60,28 @@ jobs:
           echo "=== 开始同步 ${{ env.UPSTREAM_REPO }} ==="
           
           # 获取所有上游 Tags
-          git fetch upstream --tags
           UPSTREAM_TAGS=$(git ls-remote --tags upstream | grep -v '\^{}' | awk -F/ '{print $3}' | sort -V)
           
           echo "发现上游 Tags:"
           echo "$UPSTREAM_TAGS"
           echo ""
 
-          # 处理每个 Tag
+          # 推送所有标签到origin
+          echo "📤 推送所有标签到当前仓库"
+          git push origin --tags -f || echo "⚠️ 部分标签推送可能有警告，但继续执行"
+
+          # 处理每个 Tag 的 Release
           for TAG in $UPSTREAM_TAGS; do
             echo "🔍 处理 Tag: $TAG"
             
-            # 检查这个 Tag 是否包含 workflow 文件（安全过滤）
-            if git ls-tree -r upstream/$TAG --name-only | grep -q "^\.github/workflows/"; then
+            # 安全检查：跳过包含 workflow 文件的标签
+            if git ls-tree -r "refs/tags/$TAG" --name-only 2>/dev/null | grep -q "^\.github/workflows/"; then
               echo "❌ 跳过 $TAG (包含 workflow 文件)"
               echo ""
               continue
             fi
             
             echo "✅ $TAG 是安全的 Tag"
-            
-            # 推送 Tag 到本地仓库
-            echo "📤 推送 Tag: $TAG"
-            git push origin "refs/tags/$TAG" 2>/dev/null || echo "ℹ️ Tag 可能已存在"
             
             # 检查上游是否有 Release
             UPSTREAM_RELEASE_URL="https://api.github.com/repos/${{ env.UPSTREAM_REPO }}/releases/tags/$TAG"
@@ -114,7 +129,7 @@ jobs:
             done
             
             # 创建 Release
-            if [ "$(ls -A temp_assets/$TAG/* 2>/dev/null)" ]; then
+            if [ "$(ls -A temp_assets/$TAG/ 2>/dev/null)" ]; then
               echo "🚀 创建 Release: $TAG"
               
               # 使用 GitHub API 创建 Release
