@@ -3,10 +3,10 @@ name: Auto Sync Fork with Releases
 on:
   workflow_dispatch:
 
-# 🔐 核心修复：配置工作流权限
+# 🔐 正确的权限配置
 permissions:
   contents: write   # 允许推送代码和标签
-  workflows: write  # 关键：允许写入工作流文件，解决权限错误
+  actions: write    # 关键：允许管理 Actions 和工作流文件
 
 env:
   UPSTREAM_REPO: "orion-lib/OrionTV"
@@ -22,31 +22,87 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          # 使用 PAT 以获取足够权限
+          token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Setup Git
         run: |
           git config user.name "GitHub Actions"
           git config user.email "actions@github.com"
 
-      - name: Add Upstream and Sync Tags
+      - name: Clean Local Tags and Releases
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "=== 开始清理本地 Tags 和 Releases ==="
+          
+          # 获取本地所有tags
+          LOCAL_TAGS=$(git tag -l)
+          echo "发现本地 Tags:"
+          echo "$LOCAL_TAGS"
+          echo ""
+          
+          # 删除本地所有releases
+          echo "🗑️ 删除本地Releases..."
+          LOCAL_RELEASES_URL="https://api.github.com/repos/$GITHUB_REPOSITORY/releases"
+          PAGE=1
+          
+          while true; do
+            RELEASES_RESPONSE=$(curl -s -H "Authorization: token $GITHUB_TOKEN" \
+              "$LOCAL_RELEASES_URL?page=$PAGE&per_page=100")
+            RELEASES_COUNT=$(echo "$RELEASES_RESPONSE" | jq -r 'length')
+            
+            if [ "$RELEASES_COUNT" -eq 0 ]; then
+              break
+            fi
+            
+            # 删除当前页的所有releases
+            echo "$RELEASES_RESPONSE" | jq -r '.[] | "\(.id) \(.tag_name)"' | while read RELEASE_ID TAG_NAME; do
+              if [ -n "$RELEASE_ID" ]; then
+                echo "删除Release: $TAG_NAME (ID: $RELEASE_ID)"
+                curl -s -X DELETE -H "Authorization: token $GITHUB_TOKEN" \
+                  "https://api.github.com/repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID" || echo "删除失败或已不存在"
+              fi
+            done
+            ((PAGE++))
+          done
+          
+          # 删除远程tags
+          echo "🗑️ 删除远程Tags..."
+          for TAG in $LOCAL_TAGS; do
+            echo "删除远程Tag: $TAG"
+            git push origin --delete "refs/tags/$TAG" 2>/dev/null || true
+          done
+          
+          # 删除本地tags
+          echo "🗑️ 删除本地Tags..."
+          git tag -l | xargs git tag -d 2>/dev/null || true
+          
+          echo "✅ 本地清理完成"
+          echo ""
+
+      - name: Add Upstream and Fetch Tags
         run: |
           git remote add upstream ${{ env.UPSTREAM_URL }} || true
-          # 强制同步所有标签，解决冲突
+          # 强制获取上游所有tags
           git fetch upstream --tags -f
-          git push origin --tags -f
 
       - name: Install Dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y jq curl
 
-      - name: Sync Releases and Assets
+      - name: Sync Upstream Tags and Releases
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          echo "=== 开始同步 ${{ env.UPSTREAM_REPO }} 的 Releases 和 Assets ==="
+          echo "=== 开始同步上游 ${{ env.UPSTREAM_REPO }} 的 Tags 和 Releases ==="
           
-          # 通过GitHub API获取所有上游Releases，确保完整性
+          # 推送所有上游tags到本地仓库
+          echo "📤 推送所有Tags到本地仓库..."
+          git push origin --tags -f
+          
+          # 通过GitHub API获取所有上游Releases
           UPSTREAM_RELEASES_URL="https://api.github.com/repos/${{ env.UPSTREAM_REPO }}/releases"
           PAGE=1
           ALL_TAGS=""
@@ -74,30 +130,6 @@ jobs:
           # 处理每个有Release的Tag
           for TAG in $ALL_TAGS; do
             echo "🔍 处理 Tag: $TAG"
-            
-            # 检查本地是否已有该Release
-            LOCAL_RELEASE_URL="https://api.github.com/repos/$GITHUB_REPOSITORY/releases/tags/$TAG"
-            LOCAL_RESPONSE=$(curl -s -H "Authorization: token $GITHUB_TOKEN" "$LOCAL_RELEASE_URL")
-            LOCAL_RELEASE_ID=$(echo "$LOCAL_RESPONSE" | jq -r '.id // empty')
-            
-            if [ -n "$LOCAL_RELEASE_ID" ]; then
-              echo "ℹ️ 本地已有 Release，跳过: $TAG"
-              # 检查是否需要更新assets（如果上游有新增assets）
-              UPSTREAM_RELEASE_URL="https://api.github.com/repos/${{ env.UPSTREAM_REPO }}/releases/tags/$TAG"
-              UPSTREAM_RESPONSE=$(curl -s -H "Authorization: token $GITHUB_TOKEN" "$UPSTREAM_RELEASE_URL")
-              UPSTREAM_ASSETS_COUNT=$(echo "$UPSTREAM_RESPONSE" | jq -r '.assets | length')
-              LOCAL_ASSETS_COUNT=$(echo "$LOCAL_RESPONSE" | jq -r '.assets | length')
-              
-              if [ "$UPSTREAM_ASSETS_COUNT" -gt "$LOCAL_ASSETS_COUNT" ]; then
-                echo "🔄 检测到上游有新增Assets，重新同步: $TAG"
-                # 删除本地Release以便重新创建
-                curl -s -X DELETE -H "Authorization: token $GITHUB_TOKEN" \
-                  "https://api.github.com/repos/$GITHUB_REPOSITORY/releases/$LOCAL_RELEASE_ID"
-              else
-                echo ""
-                continue
-              fi
-            fi
             
             # 获取上游Release详细信息
             UPSTREAM_RELEASE_URL="https://api.github.com/repos/${{ env.UPSTREAM_REPO }}/releases/tags/$TAG"
@@ -218,5 +250,5 @@ jobs:
         run: |
           rm -rf temp_assets
           echo "=== 同步完成 ==="
-          echo "✅ Tags 和 Releases 已同步"
+          echo "✅ Tags 和 Releases 已完全重新同步"
           echo "📊 查看结果: https://github.com/$GITHUB_REPOSITORY/releases"
